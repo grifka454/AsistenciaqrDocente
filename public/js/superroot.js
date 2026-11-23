@@ -473,13 +473,13 @@ const SuperrootModule = {
 
         if (materiasGen.length === 0) {
           materiasHtml += `
-            <div style="font-size: 0.82rem; color: var(--text-muted); padding: 0.75rem; background: #f8fafc; border-radius: var(--radius-sm); border: 1px dashed #cbd5e1; margin-bottom: 0.75rem;">
-              Este docente aún no tiene materias asignadas. Use el selector en cascada para asignarle unidades curriculares del pensum oficial.
+            <div style="font-size: 0.82rem; color: var(--text-muted); padding: 0.75rem; background: #f8fafc; border-radius: var(--radius-sm); border: 1px dashed #cbd5e1;">
+              Este docente aún no tiene materias asignadas. Use el formulario inferior de asignación de horario para asignarle clases y unidades curriculares del pensum oficial.
             </div>
           `;
         } else {
           materiasHtml += `
-            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem;">
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
               ${materiasGen.map(m => `
                 <span class="materia-tag-editable" style="display: inline-flex; align-items: center; gap: 0.45rem; background: #eff6ff; color: #1e40af; padding: 0.4rem 0.7rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #bfdbfe;">
                   <span><strong>${m.codigo || 'PNF'}:</strong> ${m.nombre_materia} (${m.trayecto} - ${m.trimestre})</span>
@@ -490,58 +490,8 @@ const SuperrootModule = {
           `;
         }
 
-        if (materiasGen.length < 5) {
-          materiasHtml += `
-            <div style="border-top: 1px dashed #cbd5e1; padding-top: 0.75rem; margin-top: 0.5rem;">
-              <div style="font-size: 0.78rem; font-weight: 700; color: var(--unermb-blue-dark); margin-bottom: 0.4rem; text-transform: uppercase;">
-                + Asignar Materia del Pensum Oficial al Docente:
-              </div>
-              <div id="materia-direct-cascade-slot"></div>
-              <button type="button" id="btn-asignar-materia-direct" class="btn btn-secondary btn-sm" style="margin-top: 0.6rem;">
-                <span>+ Guardar Materia en Perfil del Docente</span>
-              </button>
-            </div>
-          `;
-        } else {
-          materiasHtml += `
-            <div style="font-size: 0.78rem; color: var(--status-pending); font-weight: 600; padding-top: 0.3rem;">
-              Límite alcanzado: El docente ya tiene asignadas las 5 materias máximas permitidas por normativa.
-            </div>
-          `;
-        }
-
         materiasHtml += `</div>`;
         materiasContainer.innerHTML = materiasHtml;
-
-        // Renderizar fila de cascada para asignar materia directa
-        if (materiasGen.length < 5 && window.PensumCascade) {
-          let directSelectedMateriaId = null;
-          const directSlot = document.getElementById('materia-direct-cascade-slot');
-          if (directSlot) {
-            const alreadyIds = materiasGen.map(m => m.id);
-            const cascadeRow = window.PensumCascade.createCascadeRow({
-              rowIndex: 99,
-              selectedMateriaId: null,
-              alreadySelectedIds: alreadyIds,
-              canRemove: false,
-              onChange: (mId) => {
-                directSelectedMateriaId = mId;
-              }
-            });
-            directSlot.appendChild(cascadeRow);
-
-            const btnDirect = document.getElementById('btn-asignar-materia-direct');
-            if (btnDirect) {
-              btnDirect.addEventListener('click', async () => {
-                if (!directSelectedMateriaId) {
-                  showToast('Seleccione una materia mediante el selector en cascada.', 'warning');
-                  return;
-                }
-                await SuperrootModule.asignarMateriaDocente(docenteId, directSelectedMateriaId);
-              });
-            }
-          }
-        }
       }
 
       // 2. Renderizar Cuadrícula Semanal (5 días x 5 bloques fijos)
