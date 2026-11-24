@@ -167,6 +167,27 @@ async function initDatabase(retries = 5, delayMs = 3000) {
         for (const stmt of statements) {
           await connection.query(stmt);
         }
+
+        // 1.5. Migración incremental idempotente para solicitud de cambio de foto carnet
+        const [photoCols] = await connection.query(
+          `SELECT COLUMN_NAME
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'usuarios'
+             AND COLUMN_NAME IN ('requiere_cambio_foto', 'motivo_cambio_foto')`
+        );
+        const existingPhotoCols = new Set(photoCols.map(c => c.COLUMN_NAME));
+        if (!existingPhotoCols.has('requiere_cambio_foto')) {
+          await connection.query(
+            `ALTER TABLE usuarios ADD COLUMN requiere_cambio_foto TINYINT(1) NOT NULL DEFAULT 0 AFTER estado`
+          );
+        }
+        if (!existingPhotoCols.has('motivo_cambio_foto')) {
+          await connection.query(
+            `ALTER TABLE usuarios ADD COLUMN motivo_cambio_foto VARCHAR(500) NULL AFTER requiere_cambio_foto`
+          );
+        }
+
         console.log('[DB] Tablas relacionales verificadas / creadas exitosamente.');
 
         // 2. Sembrado estricto de materias según pensum2026.txt

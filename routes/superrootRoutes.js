@@ -13,6 +13,7 @@ router.get('/dashboard-stats', superrootController.getEstadisticasDashboard);
 router.get('/solicitudes', superrootController.getSolicitudesPendientes);
 router.patch('/solicitudes/:id/aprobar', superrootController.aprobarSolicitud);
 router.patch('/solicitudes/:id/rechazar', superrootController.rechazarSolicitud);
+router.patch('/solicitudes/:id/solicitar-cambio-foto', superrootController.solicitarCambioFoto);
 
 // Gestión General de Docentes
 router.get('/docentes', superrootController.getDocentes);

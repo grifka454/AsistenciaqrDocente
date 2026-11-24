@@ -20,6 +20,9 @@ router.post('/login', validateLogin, authController.login);
 // Restablecer contraseña para docentes que la hayan olvidado o deseen cambiarla
 router.post('/reset-password', authController.resetPassword);
 
+// Actualizar fotografía formal tipo carnet cuando el Superroot solicita cambio
+router.post('/actualizar-foto-carnet', handleCarnetUpload, authController.actualizarFotoCarnet);
+
 // Obtener datos del perfil autenticado
 router.get('/me', verifyToken, authController.getMe);
 

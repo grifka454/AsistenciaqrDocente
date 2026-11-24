@@ -808,6 +808,14 @@ img {
   background: #b91c1c;
 }
 
+.btn-warning {
+  background: #d97706;
+  color: var(--unermb-white);
+}
+.btn-warning:hover {
+  background: #b45309;
+}
+
 .btn-outline-primary {
   border: 1.5px solid var(--unermb-blue-primary);
   color: var(--unermb-blue-primary);

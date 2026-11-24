@@ -8,12 +8,34 @@ const SuperrootModule = {
   activeTab: 'tab-solicitudes',
   qrData: null,
   currentDocenteHorarioId: null,
+  currentCambioFotoDocenteId: null,
+  solicitudesMap: new Map(),
+
+  escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
 
   init() {
     this.setupTabNavigation();
     this.loadDashboardStats();
     this.loadSolicitudesPendientes();
     this.setupFilters();
+    this.setupCambioFotoForm();
+  },
+
+  setupCambioFotoForm() {
+    const form = document.getElementById('solicitar-cambio-foto-form');
+    if (!form || form.dataset.bound === 'true') return;
+    form.dataset.bound = 'true';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await this.enviarSolicitudCambioFoto();
+    });
   },
 
   setupTabNavigation() {
@@ -118,10 +140,12 @@ const SuperrootModule = {
       }
 
       container.innerHTML = '';
+      this.solicitudesMap.clear();
       const grid = document.createElement('div');
       grid.className = 'pending-cards-grid';
 
       data.solicitudes.forEach(docente => {
+        this.solicitudesMap.set(docente.id, docente);
         const card = document.createElement('div');
         card.className = 'docente-request-card';
 
@@ -134,12 +158,21 @@ const SuperrootModule = {
           : '<span style="font-size: 0.75rem; color: var(--text-muted); font-style: italic;">Sin materias aún (se asignarán tras su aprobación)</span>';
 
         const photoUrl = docente.foto_carnet_url ? (docente.foto_carnet_url.startsWith('http') ? docente.foto_carnet_url : ((typeof API_BASE !== 'undefined' ? API_BASE : '') + docente.foto_carnet_url)) : '/multimedia/uner.png';
+        const requiereCambioFoto = Number(docente.requiere_cambio_foto) === 1;
+        const motivoFotoHtml = requiereCambioFoto ? `
+          <div style="background: #fffbeb; border: 1px solid #fcd34d; border-left: 3px solid #d97706; border-radius: var(--radius-sm); padding: 0.55rem 0.7rem; font-size: 0.76rem; color: #92400e; line-height: 1.35;">
+            <strong>Cambio de foto solicitado:</strong> ${this.escapeHtml(docente.motivo_cambio_foto || 'Se solicitó fotografía formal de frente tipo carnet.')}
+          </div>
+        ` : '';
 
         card.innerHTML = `
           <div class="docente-profile-row">
             <img src="${photoUrl}" alt="Foto Carnet" class="docente-photo-thumb" onerror="this.src='/multimedia/uner.png'">
             <div class="docente-profile-data">
-              <span class="badge badge-pendiente" style="margin-bottom: 0.3rem;">Solicitud Pendiente</span>
+              <div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.3rem;">
+                <span class="badge badge-pendiente">Solicitud Pendiente</span>
+                ${requiereCambioFoto ? '<span class="badge" style="background: #fef3c7; color: #b45309; border: 1px solid #f59e0b;">Esperando Nueva Foto</span>' : ''}
+              </div>
               <div class="docente-fullname">${docente.nombre} ${docente.apellido}</div>
               <div class="docente-meta-item"><strong>C.I.:</strong> ${typeof formatCedula === 'function' ? formatCedula(docente.cedula) : docente.cedula}</div>
               <div class="docente-meta-item"><strong>Email:</strong> ${docente.email}</div>
@@ -148,6 +181,8 @@ const SuperrootModule = {
               </div>
             </div>
           </div>
+
+          ${motivoFotoHtml}
 
           <div style="background: #f8fafc; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid #e2e8f0;">
             <div style="font-size: 0.78rem; font-weight: 700; color: var(--unermb-blue-dark); margin-bottom: 0.4rem; display: flex; align-items: center; justify-content: space-between;">
@@ -167,6 +202,9 @@ const SuperrootModule = {
               <span>Rechazar</span>
             </button>
           </div>
+          <button type="button" class="btn btn-warning btn-sm btn-block" style="margin-top: 0.5rem;" onclick="SuperrootModule.abrirModalCambioFoto(${docente.id})">
+            <span>${requiereCambioFoto ? 'Editar Solicitud de Cambio de Foto' : 'Pedir Cambio de Foto (Tipo Carnet)'}</span>
+          </button>
         `;
 
         grid.appendChild(card);
@@ -211,6 +249,83 @@ const SuperrootModule = {
       }
     } catch {
       showToast('Error de conexión al rechazar.', 'error');
+    }
+  },
+
+  abrirModalCambioFoto(docenteId) {
+    const docente = this.solicitudesMap.get(docenteId);
+    const modal = document.getElementById('modal-solicitar-cambio-foto');
+    const infoEl = document.getElementById('cambio-foto-docente-info');
+    const motivoInput = document.getElementById('cambio-foto-motivo');
+    if (!docente || !modal || !infoEl || !motivoInput) return;
+
+    this.currentCambioFotoDocenteId = docenteId;
+
+    const photoUrl = docente.foto_carnet_url
+      ? (docente.foto_carnet_url.startsWith('http') ? docente.foto_carnet_url : ((typeof API_BASE !== 'undefined' ? API_BASE : '') + docente.foto_carnet_url))
+      : '/multimedia/uner.png';
+
+    infoEl.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 0.85rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md); padding: 0.75rem;">
+        <img src="${photoUrl}" alt="Foto actual del docente" style="width: 58px; height: 70px; object-fit: cover; border-radius: 6px; border: 1px solid var(--unermb-blue-dark);" onerror="this.src='/multimedia/uner.png'">
+        <div style="min-width: 0;">
+          <div style="font-weight: 700; color: var(--unermb-blue-dark); font-size: 0.95rem;">${this.escapeHtml(docente.nombre)} ${this.escapeHtml(docente.apellido)}</div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary);">C.I.: ${typeof formatCedula === 'function' ? formatCedula(docente.cedula) : this.escapeHtml(docente.cedula)}</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">${this.escapeHtml(docente.email)}</div>
+        </div>
+      </div>
+    `;
+
+    const defaultMotivo =
+      'Su fotografía no cumple con el formato formal requerido para un docente. Por favor, suba una fotografía formal de frente tipo carnet (rostro despejado, sin gestos ni acompañantes, buena iluminación y fondo claro o neutro).';
+    motivoInput.value = docente.motivo_cambio_foto || defaultMotivo;
+
+    modal.style.display = 'flex';
+  },
+
+  cerrarModalCambioFoto() {
+    const modal = document.getElementById('modal-solicitar-cambio-foto');
+    if (modal) modal.style.display = 'none';
+    this.currentCambioFotoDocenteId = null;
+  },
+
+  async enviarSolicitudCambioFoto() {
+    const docenteId = this.currentCambioFotoDocenteId;
+    const motivoInput = document.getElementById('cambio-foto-motivo');
+    const submitBtn = document.getElementById('btn-confirmar-cambio-foto');
+    if (!docenteId || !motivoInput) return;
+
+    const motivo = motivoInput.value.trim();
+    if (!motivo) {
+      showToast('Debe indicar el motivo o las instrucciones para la nueva fotografía.', 'warning');
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Enviando...';
+    }
+
+    try {
+      const res = await this.fetchSecure(`/api/superroot/solicitudes/${docenteId}/solicitar-cambio-foto`, {
+        method: 'PATCH',
+        body: JSON.stringify({ motivo })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success', 6000);
+        this.cerrarModalCambioFoto();
+        this.loadSolicitudesPendientes();
+      } else {
+        showToast(data.error || 'No se pudo solicitar el cambio de fotografía.', 'error');
+      }
+    } catch {
+      showToast('Error de conexión al solicitar cambio de fotografía.', 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar Solicitud de Foto';
+      }
     }
   },
 
@@ -362,6 +477,7 @@ const SuperrootModule = {
         let badgeColor = '#0266cc';
         if (log.tipo_evento.includes('ELIMINAR') || log.tipo_evento.includes('RECHAZAR')) badgeColor = '#dc2626';
         if (log.tipo_evento.includes('APROBAR') || log.tipo_evento.includes('ASIGNAR')) badgeColor = '#059669';
+        if (log.tipo_evento.includes('CAMBIO_FOTO') || log.tipo_evento.includes('FOTO_CARNET')) badgeColor = '#d97706';
         if (log.tipo_evento.includes('LOGIN')) badgeColor = '#002147';
 
         return `

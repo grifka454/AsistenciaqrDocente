@@ -55,7 +55,8 @@ const getEstadisticasDashboard = async (req, res) => {
 const getSolicitudesPendientes = async (req, res) => {
   try {
     const docentesPendientes = await db.query(`
-      SELECT id, nombre, apellido, cedula, email, foto_carnet_url, estado, created_at
+      SELECT id, nombre, apellido, cedula, email, foto_carnet_url, estado,
+             requiere_cambio_foto, motivo_cambio_foto, created_at
       FROM usuarios
       WHERE rol = 'DOCENTE' AND estado = 'PENDIENTE'
       ORDER BY created_at DESC
@@ -102,7 +103,7 @@ const aprobarSolicitud = async (req, res) => {
 
     await db.execute(`
       UPDATE usuarios
-      SET estado = 'ACTIVO'
+      SET estado = 'ACTIVO', requiere_cambio_foto = 0, motivo_cambio_foto = NULL
       WHERE id = ?
     `, [id]);
 
@@ -137,7 +138,7 @@ const rechazarSolicitud = async (req, res) => {
 
     await db.execute(`
       UPDATE usuarios
-      SET estado = 'RECHAZADO'
+      SET estado = 'RECHAZADO', requiere_cambio_foto = 0, motivo_cambio_foto = NULL
       WHERE id = ?
     `, [id]);
 
@@ -154,6 +155,57 @@ const rechazarSolicitud = async (req, res) => {
     });
   } catch (err) {
     console.error('Error al rechazar solicitud:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+/**
+ * Solicitar cambio de fotografía formal tipo carnet a una solicitud pendiente
+ */
+const solicitarCambioFoto = async (req, res) => {
+  const { id } = req.params;
+  const defaultMotivo =
+    'Su fotografía no cumple con el formato formal requerido para un docente. Por favor, suba una fotografía formal de frente tipo carnet (rostro despejado, sin gestos ni acompañantes, buena iluminación y fondo claro o neutro).';
+  const rawMotivo = typeof req.body?.motivo === 'string' ? req.body.motivo.trim() : '';
+  const motivo = (rawMotivo || defaultMotivo).slice(0, 500);
+
+  try {
+    const rows = await db.query(
+      `SELECT id, nombre, apellido, estado FROM usuarios WHERE id = ? AND rol = 'DOCENTE'`,
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Docente no encontrado.' });
+    }
+    const docente = rows[0];
+
+    if (docente.estado !== 'PENDIENTE') {
+      return res.status(400).json({
+        success: false,
+        error: 'Solo se puede solicitar cambio de fotografía a solicitudes en estado PENDIENTE.'
+      });
+    }
+
+    await db.execute(
+      `UPDATE usuarios
+       SET requiere_cambio_foto = 1, motivo_cambio_foto = ?
+       WHERE id = ?`,
+      [motivo, id]
+    );
+
+    await db.logEvent(
+      req.user.id,
+      'SOLICITAR_CAMBIO_FOTO',
+      `Solicitud de cambio de fotografía enviada a ${docente.nombre} ${docente.apellido} (ID: ${id}). Motivo: ${motivo}`,
+      req
+    );
+
+    res.json({
+      success: true,
+      message: `Se ha solicitado a ${docente.nombre} ${docente.apellido} subir una nueva fotografía formal de frente tipo carnet. Cuando intente iniciar sesión podrá cargar la nueva imagen.`
+    });
+  } catch (err) {
+    console.error('Error al solicitar cambio de foto:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -885,6 +937,7 @@ module.exports = {
   getSolicitudesPendientes,
   aprobarSolicitud,
   rechazarSolicitud,
+  solicitarCambioFoto,
   getDocentes,
   cambiarEstadoDocente,
   eliminarUsuario,

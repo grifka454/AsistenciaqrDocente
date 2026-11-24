@@ -23,7 +23,9 @@ window.API_BASE = API_BASE;
 const AppState = {
   token: localStorage.getItem('unermb_token') || null,
   user: JSON.parse(localStorage.getItem('unermb_user') || 'null'),
-  materiasCatalog: []
+  materiasCatalog: [],
+  photoUpdateToken: null,
+  selectedNewCarnetFile: null
 };
 
 // Generador de Feedback Sonoro Seguro (Web Audio API)
@@ -356,7 +358,12 @@ async function handleLoginSubmit(e) {
         if (window.initDocenteDashboard) window.initDocenteDashboard();
       }
     } else {
-      if (data.codigo_estado === 'PENDIENTE') {
+      if (data.codigo_estado === 'CAMBIO_FOTO_REQUERIDO') {
+        showToast('La Coordinación solicita que actualice su fotografía formal de frente tipo carnet.', 'warning', 7000);
+        if (typeof window.openUpdatePhotoModal === 'function') {
+          window.openUpdatePhotoModal(data);
+        }
+      } else if (data.codigo_estado === 'PENDIENTE') {
         showToast(data.error, 'warning', 7000);
       } else {
         showToast(data.error || 'Credenciales incorrectas.', 'error');
@@ -618,4 +625,175 @@ document.addEventListener('DOMContentLoaded', () => {
   if (resetForm) {
     resetForm.addEventListener('submit', handleResetPasswordSubmit);
   }
+
+  // Configurar modal de actualización de foto carnet solicitada por Superroot
+  const updatePhotoForm = document.getElementById('actualizar-foto-carnet-form');
+  const updatePhotoDropzone = document.getElementById('update-photo-dropzone');
+  const updatePhotoInput = document.getElementById('update-photo-file');
+
+  if (updatePhotoDropzone && updatePhotoInput) {
+    updatePhotoDropzone.addEventListener('click', () => updatePhotoInput.click());
+
+    updatePhotoDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      updatePhotoDropzone.classList.add('dragover');
+    });
+
+    updatePhotoDropzone.addEventListener('dragleave', () => {
+      updatePhotoDropzone.classList.remove('dragover');
+    });
+
+    updatePhotoDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      updatePhotoDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleSelectedNewCarnetFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    updatePhotoInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleSelectedNewCarnetFile(e.target.files[0]);
+      }
+    });
+  }
+
+  if (updatePhotoForm) {
+    updatePhotoForm.addEventListener('submit', handleUpdatePhotoSubmit);
+  }
 });
+
+function handleSelectedNewCarnetFile(file) {
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    showToast('Formato no permitido. Solo se aceptan imágenes JPG, PNG o WEBP.', 'error');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('La imagen supera el tamaño máximo de 5 MB.', 'error');
+    return;
+  }
+
+  AppState.selectedNewCarnetFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const previewImg = document.getElementById('update-photo-preview-img');
+    const placeholder = document.getElementById('update-photo-preview-placeholder');
+    if (previewImg && placeholder) {
+      previewImg.src = ev.target.result;
+      previewImg.style.display = 'block';
+      placeholder.style.display = 'none';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+window.openUpdatePhotoModal = function(data) {
+  const modal = document.getElementById('modal-actualizar-foto-carnet');
+  if (!modal) return;
+
+  AppState.photoUpdateToken = data.photo_update_token || null;
+  AppState.selectedNewCarnetFile = null;
+
+  const motivoEl = document.getElementById('update-photo-motivo-text');
+  const nameEl = document.getElementById('update-photo-docente-name');
+  const currentImg = document.getElementById('update-photo-current-img');
+  const previewImg = document.getElementById('update-photo-preview-img');
+  const placeholder = document.getElementById('update-photo-preview-placeholder');
+  const fileInput = document.getElementById('update-photo-file');
+
+  if (motivoEl) {
+    motivoEl.textContent =
+      data.motivo_cambio_foto ||
+      data.error ||
+      'Por favor, suba una fotografía formal de frente tipo carnet.';
+  }
+
+  if (nameEl && data.usuario) {
+    nameEl.textContent = `${data.usuario.nombre || ''} ${data.usuario.apellido || ''}`.trim() || 'Docente';
+  }
+
+  if (currentImg) {
+    const rawUrl = data.usuario && data.usuario.foto_carnet_url ? data.usuario.foto_carnet_url : '';
+    currentImg.src = rawUrl
+      ? (rawUrl.startsWith('http') ? rawUrl : (API_BASE + rawUrl))
+      : 'multimedia/uner.png';
+  }
+
+  if (previewImg) {
+    previewImg.src = '';
+    previewImg.style.display = 'none';
+  }
+  if (placeholder) {
+    placeholder.style.display = 'flex';
+  }
+  if (fileInput) {
+    fileInput.value = '';
+  }
+
+  modal.style.display = 'flex';
+};
+
+window.closeUpdatePhotoModal = function() {
+  const modal = document.getElementById('modal-actualizar-foto-carnet');
+  if (modal) modal.style.display = 'none';
+  AppState.photoUpdateToken = null;
+  AppState.selectedNewCarnetFile = null;
+};
+
+async function handleUpdatePhotoSubmit(e) {
+  e.preventDefault();
+
+  if (!AppState.photoUpdateToken) {
+    showToast('La sesión de actualización expiró. Intente iniciar sesión nuevamente.', 'error');
+    closeUpdatePhotoModal();
+    return;
+  }
+
+  if (!AppState.selectedNewCarnetFile) {
+    showToast('Debe seleccionar una nueva fotografía formal de frente tipo carnet.', 'warning');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-submit-update-photo');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Subiendo fotografía...';
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('foto_carnet', AppState.selectedNewCarnetFile);
+
+    const res = await fetch(`${API_BASE}/api/auth/actualizar-foto-carnet`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${AppState.photoUpdateToken}`
+      },
+      body: formData
+    });
+
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Respuesta no válida del servidor (${res.status})`);
+    }
+
+    if (data.success) {
+      showToast(data.message, 'success', 7000);
+      closeUpdatePhotoModal();
+    } else {
+      showToast(data.error || 'No se pudo actualizar la fotografía.', 'error', 6000);
+    }
+  } catch (err) {
+    console.error('Error al actualizar foto carnet:', err);
+    showToast('Error de conexión al subir la nueva fotografía.', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar Nueva Foto Carnet';
+    }
+  }
+}

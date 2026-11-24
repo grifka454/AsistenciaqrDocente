@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../database/db');
@@ -162,7 +164,8 @@ const login = async (req, res) => {
     const eConcat = digits ? `E${digits}` : cleanIdentificador;
 
     const users = await db.query(
-      `SELECT id, nombre, apellido, cedula, email, password_hash, foto_carnet_url, rol, estado
+      `SELECT id, nombre, apellido, cedula, email, password_hash, foto_carnet_url, rol, estado,
+              requiere_cambio_foto, motivo_cambio_foto
        FROM usuarios
        WHERE email = ? OR cedula = ? OR cedula = ? OR cedula = ? OR cedula = ? OR cedula = ? OR cedula = ?`,
       [cleanIdentificador, cleanIdentificador, digits, vPrefixed, ePrefixed, vConcat, eConcat]
@@ -188,6 +191,30 @@ const login = async (req, res) => {
 
     // Comprobación de estado del usuario
     if (user.estado === 'PENDIENTE') {
+      if (Number(user.requiere_cambio_foto) === 1) {
+        const photoUpdateToken = jwt.sign(
+          { id: user.id, purpose: 'UPDATE_PHOTO' },
+          JWT_SECRET,
+          { expiresIn: '30m' }
+        );
+        const motivo =
+          user.motivo_cambio_foto ||
+          'Su fotografía no cumple con el formato formal requerido para un docente. Por favor, suba una fotografía formal de frente tipo carnet.';
+
+        return res.status(403).json({
+          success: false,
+          codigo_estado: 'CAMBIO_FOTO_REQUERIDO',
+          error: motivo,
+          motivo_cambio_foto: motivo,
+          photo_update_token: photoUpdateToken,
+          usuario: {
+            nombre: user.nombre,
+            apellido: user.apellido,
+            foto_carnet_url: user.foto_carnet_url
+          }
+        });
+      }
+
       return res.status(403).json({
         success: false,
         codigo_estado: 'PENDIENTE',
@@ -386,11 +413,133 @@ const resetPassword = async (req, res) => {
   }
 };
 
+/**
+ * Actualizar fotografía formal tipo carnet para docente con cambio solicitado por Superroot
+ */
+const actualizarFotoCarnet = async (req, res) => {
+  const removeUploadedFile = () => {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {}
+    }
+  };
+
+  const authHeader = req.headers['authorization'];
+  let token = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.body && req.body.photo_update_token) {
+    token = req.body.photo_update_token;
+  }
+
+  if (!token) {
+    removeUploadedFile();
+    return res.status(401).json({
+      success: false,
+      error: 'Sesión de actualización expirada. Intente iniciar sesión nuevamente.'
+    });
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    removeUploadedFile();
+    return res.status(401).json({
+      success: false,
+      error: 'El enlace de actualización de foto expiró. Intente iniciar sesión nuevamente.'
+    });
+  }
+
+  if (!decoded || decoded.purpose !== 'UPDATE_PHOTO' || !decoded.id) {
+    removeUploadedFile();
+    return res.status(403).json({
+      success: false,
+      error: 'Token no autorizado para actualización de fotografía.'
+    });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      error: 'Debe seleccionar una fotografía formal de frente tipo carnet (JPG, PNG o WEBP).'
+    });
+  }
+
+  try {
+    const rows = await db.query(
+      `SELECT id, nombre, apellido, cedula, foto_carnet_url, estado, requiere_cambio_foto
+       FROM usuarios
+       WHERE id = ? AND rol = 'DOCENTE'`,
+      [decoded.id]
+    );
+
+    if (rows.length === 0) {
+      removeUploadedFile();
+      return res.status(404).json({ success: false, error: 'Usuario docente no encontrado.' });
+    }
+
+    const user = rows[0];
+    if (user.estado !== 'PENDIENTE' || Number(user.requiere_cambio_foto) !== 1) {
+      removeUploadedFile();
+      return res.status(403).json({
+        success: false,
+        error: 'Su cuenta no tiene una solicitud activa de cambio de fotografía.'
+      });
+    }
+
+    const nuevaFotoUrl = `/uploads/carnet/${req.file.filename}`;
+
+    await db.execute(
+      `UPDATE usuarios
+       SET foto_carnet_url = ?, requiere_cambio_foto = 0, motivo_cambio_foto = NULL
+       WHERE id = ?`,
+      [nuevaFotoUrl, user.id]
+    );
+
+    // Eliminar archivo de foto anterior en disco si existe y pertenece a uploads/carnet
+    if (
+      user.foto_carnet_url &&
+      user.foto_carnet_url.startsWith('/uploads/carnet/') &&
+      user.foto_carnet_url !== nuevaFotoUrl
+    ) {
+      const oldFilePath = path.join(__dirname, '..', user.foto_carnet_url.replace(/^\//, ''));
+      if (fs.existsSync(oldFilePath)) {
+        try {
+          fs.unlinkSync(oldFilePath);
+        } catch {}
+      }
+    }
+
+    await db.logEvent(
+      user.id,
+      'ACTUALIZAR_FOTO_CARNET',
+      `El docente ${user.nombre} ${user.apellido} (${user.cedula}) cargó una nueva fotografía formal tipo carnet para revisión.`,
+      req
+    );
+
+    res.json({
+      success: true,
+      message: '¡Fotografía actualizada exitosamente! Su solicitud ha sido enviada nuevamente a la Coordinación del PNF para revisión y aprobación.',
+      foto_carnet_url: nuevaFotoUrl
+    });
+  } catch (err) {
+    removeUploadedFile();
+    console.error('Error al actualizar foto carnet:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Error interno al actualizar la fotografía.'
+    });
+  }
+};
+
 module.exports = {
   getMateriasCatalog,
   getEstructuraPensum,
   registerDocente,
   login,
   getMe,
-  resetPassword
+  resetPassword,
+  actualizarFotoCarnet
 };
