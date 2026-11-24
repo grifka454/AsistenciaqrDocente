@@ -98,6 +98,12 @@ const registerDocente = async (req, res) => {
   const { nombre, apellido, cedula, email, password, materiasIds, fotoUrl, existingPendingPhotoUser } = req.sanitizedData;
 
   try {
+    // Persistir la fotografía cargada en MySQL para sobrevivir redespliegues en Railway
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      const photoBuffer = fs.readFileSync(req.file.path);
+      await db.saveCarnetPhoto(req.file.filename, req.file.mimetype, photoBuffer);
+    }
+
     // Si el docente ya tenía una solicitud PENDIENTE con cambio de foto solicitado,
     // actualizar únicamente su fotografía en la misma solicitud sin duplicar su cuenta
     if (existingPendingPhotoUser) {
@@ -113,6 +119,7 @@ const registerDocente = async (req, res) => {
         existingPendingPhotoUser.foto_carnet_url.startsWith('/uploads/carnet/') &&
         existingPendingPhotoUser.foto_carnet_url !== fotoUrl
       ) {
+        await db.deleteCarnetPhoto(existingPendingPhotoUser.foto_carnet_url);
         const oldFilePath = path.join(__dirname, '..', existingPendingPhotoUser.foto_carnet_url.replace(/^\//, ''));
         if (fs.existsSync(oldFilePath)) {
           try {
@@ -537,6 +544,12 @@ const actualizarFotoCarnet = async (req, res) => {
 
     const nuevaFotoUrl = `/uploads/carnet/${req.file.filename}`;
 
+    // Persistir la nueva fotografía en MySQL para sobrevivir redespliegues en Railway
+    if (req.file.path && fs.existsSync(req.file.path)) {
+      const photoBuffer = fs.readFileSync(req.file.path);
+      await db.saveCarnetPhoto(req.file.filename, req.file.mimetype, photoBuffer);
+    }
+
     await db.execute(
       `UPDATE usuarios
        SET foto_carnet_url = ?, requiere_cambio_foto = 0, motivo_cambio_foto = NULL
@@ -544,12 +557,13 @@ const actualizarFotoCarnet = async (req, res) => {
       [nuevaFotoUrl, user.id]
     );
 
-    // Eliminar archivo de foto anterior en disco si existe y pertenece a uploads/carnet
+    // Eliminar archivo de foto anterior en disco y MySQL si existe y pertenece a uploads/carnet
     if (
       user.foto_carnet_url &&
       user.foto_carnet_url.startsWith('/uploads/carnet/') &&
       user.foto_carnet_url !== nuevaFotoUrl
     ) {
+      await db.deleteCarnetPhoto(user.foto_carnet_url);
       const oldFilePath = path.join(__dirname, '..', user.foto_carnet_url.replace(/^\//, ''));
       if (fs.existsSync(oldFilePath)) {
         try {

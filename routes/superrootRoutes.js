@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const superrootController = require('../controllers/superrootController');
 const { verifyToken, requireSuperroot } = require('../middlewares/auth');
+const { handleCarnetUpload } = require('../middlewares/upload');
 
 // Todas las rutas requieren autenticación y rol SUPERROOT
 router.use(verifyToken, requireSuperroot);
@@ -18,6 +19,7 @@ router.patch('/solicitudes/:id/solicitar-cambio-foto', superrootController.solic
 // Gestión General de Docentes
 router.get('/docentes', superrootController.getDocentes);
 router.patch('/docentes/:id/estado', superrootController.cambiarEstadoDocente);
+router.patch('/docentes/:id/foto-carnet', handleCarnetUpload, superrootController.actualizarFotoDocenteAdmin);
 
 // Gestión de Usuarios: Eliminación directa (Requerimiento 2.A.1)
 router.delete('/usuarios/:id', superrootController.eliminarUsuario);

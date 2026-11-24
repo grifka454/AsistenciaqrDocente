@@ -14,7 +14,7 @@ if (!fs.existsSync(uploadCarnetDir)) {
 }
 
 // Inicializador de base de datos MySQL relacional persistente
-const { initDatabase } = require('./database/db');
+const { initDatabase, getCarnetPhoto } = require('./database/db');
 
 const authRoutes = require('./routes/authRoutes');
 const superrootRoutes = require('./routes/superrootRoutes');
@@ -40,8 +40,32 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Servir recursos estáticos:
 // 1. multimedia: logos institucionales (uner.png, pnf.png)
 app.use('/multimedia', express.static(path.join(__dirname, 'multimedia')));
-// 2. uploads: fotos tipo carnet subidas por los docentes
+// 2. uploads: fotos tipo carnet subidas por los docentes (disco local + respaldo persistente en MySQL)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.get('/uploads/carnet/:filename', async (req, res) => {
+  const safeName = path.basename(req.params.filename || '');
+  if (!safeName || safeName !== req.params.filename) {
+    return res.status(400).end();
+  }
+
+  try {
+    const photo = await getCarnetPhoto(safeName);
+    if (!photo || !photo.data) {
+      return res.status(404).end();
+    }
+
+    // Rehidratar caché en disco local de forma asíncrona para futuras peticiones
+    const localPath = path.join(uploadCarnetDir, safeName);
+    fs.promises.writeFile(localPath, photo.data).catch(() => {});
+
+    res.setHeader('Content-Type', photo.mime_type || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.send(photo.data);
+  } catch (err) {
+    console.error('[UPLOADS] Error al servir foto carnet desde MySQL:', err.message);
+    return res.status(500).end();
+  }
+});
 // 3. public: interfaz de usuario web responsive
 app.use(express.static(path.join(__dirname, 'public')));
 

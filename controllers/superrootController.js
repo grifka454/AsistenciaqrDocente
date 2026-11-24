@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const db = require('../database/db');
@@ -330,7 +332,7 @@ const eliminarUsuario = async (req, res) => {
   }
 
   try {
-    const users = await db.query('SELECT id, nombre, apellido, cedula, email, rol FROM usuarios WHERE id = ?', [usuarioId]);
+    const users = await db.query('SELECT id, nombre, apellido, cedula, email, rol, foto_carnet_url FROM usuarios WHERE id = ?', [usuarioId]);
     if (users.length === 0) {
       return res.status(404).json({ success: false, error: 'Usuario no encontrado.' });
     }
@@ -347,6 +349,17 @@ const eliminarUsuario = async (req, res) => {
 
     // Ejecutar eliminación (Las llaves foráneas con ON DELETE CASCADE limpian materias, horarios y asistencias)
     await db.execute('DELETE FROM usuarios WHERE id = ?', [usuarioId]);
+
+    // Limpiar foto carnet asociada en MySQL y disco local
+    if (usuario.foto_carnet_url && usuario.foto_carnet_url.startsWith('/uploads/carnet/')) {
+      await db.deleteCarnetPhoto(usuario.foto_carnet_url);
+      const oldFilePath = path.join(__dirname, '..', usuario.foto_carnet_url.replace(/^\//, ''));
+      if (fs.existsSync(oldFilePath)) {
+        try {
+          fs.unlinkSync(oldFilePath);
+        } catch {}
+      }
+    }
 
     await db.logEvent(
       req.user.id,
@@ -932,6 +945,72 @@ const getAsistenciasLogs = async (req, res) => {
   }
 };
 
+/**
+ * Actualizar o restaurar foto carnet de un docente (Exclusivo Superroot)
+ */
+const actualizarFotoDocenteAdmin = async (req, res) => {
+  const { id } = req.params;
+  const docenteId = parseInt(id, 10);
+
+  const removeUploadedFile = () => {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {}
+    }
+  };
+
+  if (isNaN(docenteId) || !req.file) {
+    removeUploadedFile();
+    return res.status(400).json({ success: false, error: 'Docente e imagen requeridos.' });
+  }
+
+  try {
+    const rows = await db.query(
+      `SELECT id, nombre, apellido, foto_carnet_url FROM usuarios WHERE id = ? AND rol = 'DOCENTE'`,
+      [docenteId]
+    );
+    if (rows.length === 0) {
+      removeUploadedFile();
+      return res.status(404).json({ success: false, error: 'Docente no encontrado.' });
+    }
+
+    const docente = rows[0];
+    const nuevaFotoUrl = `/uploads/carnet/${req.file.filename}`;
+    const photoBuffer = fs.readFileSync(req.file.path);
+    await db.saveCarnetPhoto(req.file.filename, req.file.mimetype, photoBuffer);
+
+    await db.execute(
+      `UPDATE usuarios SET foto_carnet_url = ?, requiere_cambio_foto = 0, motivo_cambio_foto = NULL WHERE id = ?`,
+      [nuevaFotoUrl, docenteId]
+    );
+
+    if (
+      docente.foto_carnet_url &&
+      docente.foto_carnet_url.startsWith('/uploads/carnet/') &&
+      docente.foto_carnet_url !== nuevaFotoUrl
+    ) {
+      await db.deleteCarnetPhoto(docente.foto_carnet_url);
+      const oldFilePath = path.join(__dirname, '..', docente.foto_carnet_url.replace(/^\//, ''));
+      if (fs.existsSync(oldFilePath)) {
+        try {
+          fs.unlinkSync(oldFilePath);
+        } catch {}
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Fotografía de ${docente.nombre} ${docente.apellido} actualizada y respaldada permanentemente.`,
+      foto_carnet_url: nuevaFotoUrl
+    });
+  } catch (err) {
+    removeUploadedFile();
+    console.error('Error al actualizar foto docente (admin):', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   getEstadisticasDashboard,
   getSolicitudesPendientes,
@@ -940,6 +1019,7 @@ module.exports = {
   solicitarCambioFoto,
   getDocentes,
   cambiarEstadoDocente,
+  actualizarFotoDocenteAdmin,
   eliminarUsuario,
   getSystemLogs,
   getDocenteHorario,

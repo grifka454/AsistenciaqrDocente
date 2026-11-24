@@ -134,3 +134,12 @@ CREATE TABLE IF NOT EXISTS qr_tokens_seguridad (
     CONSTRAINT fk_qr_creador FOREIGN KEY (creado_por) REFERENCES usuarios(id) ON DELETE SET NULL ON UPDATE CASCADE,
     INDEX idx_qr_activo (activo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8. TABLA: fotos_carnet
+-- Almacenamiento persistente de fotografías tipo carnet en MySQL (evita pérdida en redespliegues efímeros de Railway)
+CREATE TABLE IF NOT EXISTS fotos_carnet (
+    filename VARCHAR(255) PRIMARY KEY,
+    mime_type VARCHAR(60) NOT NULL,
+    data LONGBLOB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

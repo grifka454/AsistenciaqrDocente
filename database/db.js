@@ -260,10 +260,52 @@ async function initDatabase(retries = 5, delayMs = 3000) {
   }
 }
 
+/**
+ * Guardar fotografía tipo carnet de forma persistente en MySQL
+ */
+async function saveCarnetPhoto(filename, mimeType, buffer) {
+  if (!filename || !buffer) return;
+  await pool.execute(
+    `INSERT INTO fotos_carnet (filename, mime_type, data)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE mime_type = VALUES(mime_type), data = VALUES(data), created_at = CURRENT_TIMESTAMP`,
+    [filename, mimeType || 'image/jpeg', buffer]
+  );
+}
+
+/**
+ * Recuperar fotografía tipo carnet desde MySQL
+ */
+async function getCarnetPhoto(filename) {
+  if (!filename) return null;
+  const [rows] = await pool.query(
+    `SELECT mime_type, data FROM fotos_carnet WHERE filename = ? LIMIT 1`,
+    [filename]
+  );
+  return rows && rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Eliminar fotografía tipo carnet persistida en MySQL (si pertenece a /uploads/carnet/)
+ */
+async function deleteCarnetPhoto(fotoUrl) {
+  if (!fotoUrl || typeof fotoUrl !== 'string' || !fotoUrl.startsWith('/uploads/carnet/')) return;
+  const filename = path.basename(fotoUrl);
+  if (!filename) return;
+  try {
+    await pool.execute('DELETE FROM fotos_carnet WHERE filename = ?', [filename]);
+  } catch (err) {
+    console.warn('[DB] Advertencia al eliminar foto carnet de MySQL:', err.message);
+  }
+}
+
 module.exports = {
   pool,
   query,
   execute,
   logEvent,
-  initDatabase
+  initDatabase,
+  saveCarnetPhoto,
+  getCarnetPhoto,
+  deleteCarnetPhoto
 };
