@@ -261,7 +261,7 @@ const RegisterModule = {
       const data = await res.json();
 
       if (data.success) {
-        showToast('¡Registro completado exitosamente!', 'success', 7000);
+        showToast(data.message || '¡Registro completado exitosamente!', 'success', 7000);
         
         // Cargar datos en pantalla de éxito
         const fullNameEl = document.getElementById('reg-success-fullname');
@@ -274,9 +274,18 @@ const RegisterModule = {
         if (emailEl) emailEl.textContent = email;
         if (materiasEl) materiasEl.textContent = 'Pendientes por asignar por el Superroot';
 
-        // Limpiar formulario
+        // Limpiar formulario y vista previa
         document.getElementById('docente-registration-form').reset();
         this.uploadedFotoFile = null;
+        const previewImg = document.getElementById('carnet-preview-img');
+        const previewPlaceholder = document.getElementById('carnet-preview-placeholder');
+        if (previewImg) {
+          previewImg.src = '';
+          previewImg.style.display = 'none';
+        }
+        if (previewPlaceholder) {
+          previewPlaceholder.style.display = 'flex';
+        }
 
         navigateTo('view-registration-success');
       } else {

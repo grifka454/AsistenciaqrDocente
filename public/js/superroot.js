@@ -149,18 +149,10 @@ const SuperrootModule = {
         const card = document.createElement('div');
         card.className = 'docente-request-card';
 
-        const materiasHtml = (docente.materias && docente.materias.length > 0)
-          ? docente.materias.map(m => `
-              <span class="materia-tag" title="${m.trayecto} - ${m.trimestre}">
-                <strong>${m.codigo || 'PNF'}</strong>: ${m.nombre_materia}
-              </span>
-            `).join('')
-          : '<span style="font-size: 0.75rem; color: var(--text-muted); font-style: italic;">Sin materias aún (se asignarán tras su aprobación)</span>';
-
         const photoUrl = docente.foto_carnet_url ? (docente.foto_carnet_url.startsWith('http') ? docente.foto_carnet_url : ((typeof API_BASE !== 'undefined' ? API_BASE : '') + docente.foto_carnet_url)) : '/multimedia/uner.png';
         const requiereCambioFoto = Number(docente.requiere_cambio_foto) === 1;
         const motivoFotoHtml = requiereCambioFoto ? `
-          <div style="background: #fffbeb; border: 1px solid #fcd34d; border-left: 3px solid #d97706; border-radius: var(--radius-sm); padding: 0.55rem 0.7rem; font-size: 0.76rem; color: #92400e; line-height: 1.35;">
+          <div style="background: #fffbeb; border: 1px solid #fcd34d; border-left: 3px solid #d97706; border-radius: var(--radius-sm); padding: 0.6rem 0.75rem; font-size: 0.76rem; color: #92400e; line-height: 1.38;">
             <strong>Cambio de foto solicitado:</strong> ${this.escapeHtml(docente.motivo_cambio_foto || 'Se solicitó fotografía formal de frente tipo carnet.')}
           </div>
         ` : '';
@@ -184,27 +176,25 @@ const SuperrootModule = {
 
           ${motivoFotoHtml}
 
-          <div style="background: #f8fafc; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid #e2e8f0;">
-            <div style="font-size: 0.78rem; font-weight: 700; color: var(--unermb-blue-dark); margin-bottom: 0.4rem; display: flex; align-items: center; justify-content: space-between;">
-              <span>Materias Asignadas:</span>
-              <span class="badge" style="background: var(--unermb-blue-dark); color: #fff;">${(docente.materias || []).length} / 5</span>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div class="docente-actions-row">
+              ${requiereCambioFoto ? `
+                <button type="button" class="btn btn-success btn-sm btn-block" disabled style="opacity: 0.55; cursor: not-allowed;" title="Se habilitará cuando el docente suba su nueva fotografía formal tipo carnet">
+                  <span>Esperando Foto</span>
+                </button>
+              ` : `
+                <button class="btn btn-success btn-sm btn-block" onclick="SuperrootModule.aprobarDocente(${docente.id}, '${docente.nombre} ${docente.apellido}')">
+                  <span>Aprobar Docente</span>
+                </button>
+              `}
+              <button class="btn btn-danger btn-sm btn-block" onclick="SuperrootModule.rechazarDocente(${docente.id}, '${docente.nombre} ${docente.apellido}')">
+                <span>Rechazar</span>
+              </button>
             </div>
-            <div class="docente-materias-tags">
-              ${materiasHtml}
-            </div>
-          </div>
-
-          <div class="docente-actions-row">
-            <button class="btn btn-success btn-sm btn-block" onclick="SuperrootModule.aprobarDocente(${docente.id}, '${docente.nombre} ${docente.apellido}')">
-              <span>Aprobar Docente</span>
-            </button>
-            <button class="btn btn-danger btn-sm btn-block" onclick="SuperrootModule.rechazarDocente(${docente.id}, '${docente.nombre} ${docente.apellido}')">
-              <span>Rechazar</span>
+            <button type="button" class="btn btn-warning btn-sm btn-block" onclick="SuperrootModule.abrirModalCambioFoto(${docente.id})">
+              <span>${requiereCambioFoto ? 'Editar Solicitud de Cambio de Foto' : 'Pedir Cambio de Foto (Tipo Carnet)'}</span>
             </button>
           </div>
-          <button type="button" class="btn btn-warning btn-sm btn-block" style="margin-top: 0.5rem;" onclick="SuperrootModule.abrirModalCambioFoto(${docente.id})">
-            <span>${requiereCambioFoto ? 'Editar Solicitud de Cambio de Foto' : 'Pedir Cambio de Foto (Tipo Carnet)'}</span>
-          </button>
         `;
 
         grid.appendChild(card);

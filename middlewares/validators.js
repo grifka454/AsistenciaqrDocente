@@ -1,3 +1,4 @@
+const fs = require('fs');
 const db = require('../database/db');
 
 // Expresiones regulares de seguridad
@@ -138,21 +139,71 @@ const validateRegistroDocente = async (req, res, next) => {
     }
   }
 
+  const removeTempFile = () => {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {}
+    }
+  };
+
   try {
     // 9. Comprobación de Unicidad en Base de Datos MySQL (comprobando con y sin prefijo V-/E-)
     const existeCedula = await db.query(
-      'SELECT id FROM usuarios WHERE cedula = ? OR cedula = ? OR cedula = ?',
+      'SELECT id, nombre, apellido, cedula, email, foto_carnet_url, estado, requiere_cambio_foto FROM usuarios WHERE cedula = ? OR cedula = ? OR cedula = ?',
       [formattedCedula, cleanDigits, `${tipoCedula}${cleanDigits}`]
     );
-    if (existeCedula.length > 0) {
+    const existeEmail = await db.query(
+      'SELECT id, nombre, apellido, cedula, email, foto_carnet_url, estado, requiere_cambio_foto FROM usuarios WHERE email = ?',
+      [cleanEmail]
+    );
+
+    const userCedula = existeCedula[0] || null;
+    const userEmail = existeEmail[0] || null;
+
+    // Caso especial: el docente ya tiene una solicitud PENDIENTE con cambio de foto solicitado
+    // Si coinciden cédula y correo del mismo registro pendiente, actualizar su foto sin duplicar cuenta
+    if (
+      userCedula &&
+      userEmail &&
+      userCedula.id === userEmail.id &&
+      userCedula.estado === 'PENDIENTE' &&
+      Number(userCedula.requiere_cambio_foto) === 1
+    ) {
+      req.sanitizedData = {
+        nombre: userCedula.nombre,
+        apellido: userCedula.apellido,
+        cedula: userCedula.cedula,
+        email: userCedula.email,
+        password: password,
+        materiasIds: materiasUnicas,
+        fotoUrl: `/uploads/carnet/${req.file.filename}`,
+        existingPendingPhotoUser: userCedula
+      };
+      return next();
+    }
+
+    if (
+      (userCedula && userCedula.estado === 'PENDIENTE' && Number(userCedula.requiere_cambio_foto) === 1) ||
+      (userEmail && userEmail.estado === 'PENDIENTE' && Number(userEmail.requiere_cambio_foto) === 1)
+    ) {
+      removeTempFile();
+      return res.status(409).json({
+        success: false,
+        error: 'Ya tienes una solicitud pendiente esperando cambio de foto. Por favor ve a "Iniciar Sesión" e ingresa con tu correo/cédula y contraseña originales para actualizar tu fotografía sin crear otra cuenta.'
+      });
+    }
+
+    if (userCedula) {
+      removeTempFile();
       return res.status(409).json({
         success: false,
         error: 'La Cédula de Identidad ya se encuentra registrada en el sistema.'
       });
     }
 
-    const existeEmail = await db.query('SELECT id FROM usuarios WHERE email = ?', [cleanEmail]);
-    if (existeEmail.length > 0) {
+    if (userEmail) {
+      removeTempFile();
       return res.status(409).json({
         success: false,
         error: 'El Correo Electrónico ya se encuentra registrado en el sistema.'
@@ -172,6 +223,7 @@ const validateRegistroDocente = async (req, res, next) => {
 
     next();
   } catch (err) {
+    removeTempFile();
     console.error('Error en validación de registro:', err);
     return res.status(500).json({
       success: false,

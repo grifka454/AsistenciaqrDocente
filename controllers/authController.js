@@ -95,9 +95,55 @@ const getEstructuraPensum = async (req, res) => {
  * Registro de nuevo docente del PNF en Informática
  */
 const registerDocente = async (req, res) => {
-  const { nombre, apellido, cedula, email, password, materiasIds, fotoUrl } = req.sanitizedData;
+  const { nombre, apellido, cedula, email, password, materiasIds, fotoUrl, existingPendingPhotoUser } = req.sanitizedData;
 
   try {
+    // Si el docente ya tenía una solicitud PENDIENTE con cambio de foto solicitado,
+    // actualizar únicamente su fotografía en la misma solicitud sin duplicar su cuenta
+    if (existingPendingPhotoUser) {
+      await db.execute(
+        `UPDATE usuarios
+         SET foto_carnet_url = ?, requiere_cambio_foto = 0, motivo_cambio_foto = NULL
+         WHERE id = ?`,
+        [fotoUrl, existingPendingPhotoUser.id]
+      );
+
+      if (
+        existingPendingPhotoUser.foto_carnet_url &&
+        existingPendingPhotoUser.foto_carnet_url.startsWith('/uploads/carnet/') &&
+        existingPendingPhotoUser.foto_carnet_url !== fotoUrl
+      ) {
+        const oldFilePath = path.join(__dirname, '..', existingPendingPhotoUser.foto_carnet_url.replace(/^\//, ''));
+        if (fs.existsSync(oldFilePath)) {
+          try {
+            fs.unlinkSync(oldFilePath);
+          } catch {}
+        }
+      }
+
+      await db.logEvent(
+        existingPendingPhotoUser.id,
+        'ACTUALIZAR_FOTO_CARNET',
+        `El docente ${existingPendingPhotoUser.nombre} ${existingPendingPhotoUser.apellido} (${existingPendingPhotoUser.cedula}) actualizó su fotografía formal tipo carnet para revisión.`,
+        req
+      );
+
+      return res.status(200).json({
+        success: true,
+        photoUpdated: true,
+        message: '¡Fotografía formal actualizada en su solicitud existente! Su solicitud ha sido enviada nuevamente a la Coordinación del PNF para revisión y aprobación.',
+        usuario: {
+          id: existingPendingPhotoUser.id,
+          nombre: existingPendingPhotoUser.nombre,
+          apellido: existingPendingPhotoUser.apellido,
+          cedula: existingPendingPhotoUser.cedula,
+          email: existingPendingPhotoUser.email,
+          estado: 'PENDIENTE',
+          materias_registradas: 0
+        }
+      });
+    }
+
     // 1. Hashear contraseña con bcrypt (factor de costo 12)
     const salt = bcrypt.genSaltSync(12);
     const passwordHash = bcrypt.hashSync(password, salt);
